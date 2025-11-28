@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import json
 import csv
 import os
@@ -17,7 +17,7 @@ from PyQt6.QtPrintSupport import QPrinter
 # --- CONSTANTS ---
 CONFIG_FILE = "satreq_config.json"
 ICON_NAME = "icon.ico"
-VERSION = "3.4 Pro (With Filters)"  # Aggiornata versione
+VERSION = "3.6 Pro (Final)"
 
 # --- STYLE (Dark Theme) ---
 STYLESHEET = """
@@ -141,7 +141,6 @@ class RequirementDialog(QDialog):
         if req_data:
             self.inp_id.setText(req_data.get('id', ''))
             self.inp_type.setCurrentText(req_data.get('type', 'System'))
-            # Legacy support for plain text and HTML
             if '<' in req_data.get('desc', ''): self.inp_desc.setHtml(req_data.get('desc', ''))
             else: self.inp_desc.setPlainText(req_data.get('desc', ''))
             self.inp_parent.setText(req_data.get('parent_id', '')) 
@@ -167,12 +166,28 @@ class RequirementDialog(QDialog):
 
     def validate_and_accept(self):
         new_id = self.inp_id.text().strip()
+        parent_id = self.inp_parent.text().strip()
+
+        # 1. Mandatory ID check
         if not new_id:
             QMessageBox.warning(self, "Error", "ID is mandatory.")
             return
+        
+        # 2. Duplicate ID check
         if new_id in self.existing_ids and new_id != self.original_id:
             QMessageBox.warning(self, "ID Error", f"The ID '{new_id}' already exists in this project!")
             return
+
+        # 3. Parent Existence Check
+        if parent_id and parent_id not in self.existing_ids:
+             QMessageBox.warning(self, "Parent Error", f"The Parent ID '{parent_id}' does not exist in the project.\nPlease check for typos.")
+             return
+        
+        # 4. Self-parenting Check
+        if parent_id and parent_id == new_id:
+             QMessageBox.warning(self, "Parent Error", "A requirement cannot be its own parent.")
+             return
+
         self.accept()
 
     def get_data(self):
@@ -205,14 +220,13 @@ class ChildrenViewDialog(QDialog):
         table.setColumnCount(5)
         table.setHorizontalHeaderLabels(["Subsystem", "ID", "Description", "Status", "Last Modified"])
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch) # Stretch Desc
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         table.setRowCount(len(children_data))
         table.setWordWrap(True)
         
         for i, child in enumerate(children_data):
             table.setItem(i, 0, QTableWidgetItem(child.get('subsystem', '-')))
             table.setItem(i, 1, QTableWidgetItem(child['id']))
-            # Clean HTML for quick table view
             plain_desc = QTextDocument(); plain_desc.setHtml(child['desc'])
             table.setItem(i, 2, QTableWidgetItem(plain_desc.toPlainText()))
             table.setItem(i, 3, QTableWidgetItem(child['status']))
@@ -260,7 +274,7 @@ class SatReqManager(QMainWindow):
         left = QWidget(); lv = QVBoxLayout(left); lv.setContentsMargins(0,0,0,0)
         self.tree = QTreeWidget(); self.tree.setHeaderHidden(True); self.tree.itemClicked.connect(self.on_tree_click)
         
-        # --- PROJECT BUTTONS (GRID LAYOUT for space efficiency) ---
+        # --- PROJECT BUTTONS ---
         ptools = QGridLayout(); ptools.setSpacing(4)
         
         self.btn_np = QPushButton("New"); self.btn_np.setObjectName("BtnPrimary"); self.btn_np.clicked.connect(self.add_project)
@@ -270,15 +284,10 @@ class SatReqManager(QMainWindow):
         self.btn_add_sub = QPushButton("+ Subsystem"); self.btn_add_sub.clicked.connect(self.add_subsystem); self.btn_add_sub.setEnabled(False)
         self.btn_del_sub = QPushButton("- Subsystem"); self.btn_del_sub.clicked.connect(self.delete_subsystem); self.btn_del_sub.setEnabled(False)
         
-        # Row 0: New | Edit
         ptools.addWidget(self.btn_np, 0, 0)
         ptools.addWidget(self.btn_ep, 0, 1)
-        
-        # Row 1: +Sub | -Sub
         ptools.addWidget(self.btn_add_sub, 1, 0)
         ptools.addWidget(self.btn_del_sub, 1, 1)
-        
-        # Row 2: Delete Project (Span 2 columns)
         ptools.addWidget(self.btn_dp, 2, 0, 1, 2)
 
         lv.addWidget(QLabel("PROJECT STRUCTURE", styleSheet="font-weight:bold; color:#89b4fa")); lv.addWidget(self.tree); lv.addLayout(ptools)
@@ -308,7 +317,7 @@ class SatReqManager(QMainWindow):
         self.btn_dr = QPushButton(" Delete"); self.btn_dr.setObjectName("BtnDanger"); self.btn_dr.setEnabled(False); self.btn_dr.clicked.connect(self.delete_requirement)
         
         rtools.addWidget(self.search)
-        rtools.addWidget(self.filter_type) # Added to Layout
+        rtools.addWidget(self.filter_type)
         rtools.addStretch()
         rtools.addWidget(self.btn_nr); rtools.addWidget(self.btn_dr)
 
@@ -321,8 +330,8 @@ class SatReqManager(QMainWindow):
         
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch) # Description Stretches
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents) # ID Fits Content
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch) 
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         
         header.sectionResized.connect(self.table.resizeRowsToContents)
         
@@ -403,10 +412,10 @@ class SatReqManager(QMainWindow):
             # --- ENABLE TOOLS ---
             self.btn_nr.setEnabled(True)
             self.search.setEnabled(True)
-            self.filter_type.setEnabled(True) # Enable Filter
+            self.filter_type.setEnabled(True) 
             
             self.btn_ep.setEnabled(False); self.btn_dp.setEnabled(False)
-            self.btn_add_sub.setEnabled(False); self.btn_del_sub.setEnabled(True) # Enable Delete Sub
+            self.btn_add_sub.setEnabled(False); self.btn_del_sub.setEnabled(True)
             self.load_table()
         else: # Is Project
             self.current_project = data
@@ -417,10 +426,10 @@ class SatReqManager(QMainWindow):
             # --- DISABLE TOOLS ---
             self.btn_nr.setEnabled(False)
             self.search.setEnabled(False)
-            self.filter_type.setEnabled(False) # Disable Filter
+            self.filter_type.setEnabled(False)
             
             self.btn_ep.setEnabled(True); self.btn_dp.setEnabled(True)
-            self.btn_add_sub.setEnabled(True); self.btn_del_sub.setEnabled(False) # Enable Add Sub
+            self.btn_add_sub.setEnabled(True); self.btn_del_sub.setEnabled(False)
 
     def load_table(self):
         if not self.current_project or not self.current_subsystem: return
@@ -446,8 +455,6 @@ class SatReqManager(QMainWindow):
             
         self.table.setSortingEnabled(True)
         self.table.resizeRowsToContents() 
-        
-        # Apply filters immediately after loading
         self.apply_filter()
 
     def color_row(self, row, req):
@@ -460,13 +467,13 @@ class SatReqManager(QMainWindow):
         stat_fg = default_fg
         
         if review:
-            stat_fg = QColor("#FFFF00") # Yellow
+            stat_fg = QColor("#FFFF00") 
         elif "Verified" in st:
-            stat_fg = QColor("#a6e3a1") # Green
+            stat_fg = QColor("#a6e3a1") 
         elif "TBD" in st or "TBC" in st:
-            stat_fg = QColor("#f38ba8") # Red/Pink
+            stat_fg = QColor("#f38ba8") 
         elif "Closed" in st:
-            stat_fg = QColor("#6c7086") # Grey
+            stat_fg = QColor("#6c7086") 
 
         for c in range(8):
             it = self.table.item(row, c)
@@ -493,7 +500,6 @@ class SatReqManager(QMainWindow):
             if filter_type == "All Types" or row_type == filter_type:
                 match_type = True
 
-            # Combined Logic
             self.table.setRowHidden(r, not (match_text and match_type))
 
     # --- ACTIONS ---
@@ -545,7 +551,9 @@ class SatReqManager(QMainWindow):
         d = RequirementDialog(self, all_ids)
         if d.exec():
             new_req = d.get_data()
+            # --- MODIFICATO: Usa append per aggiungere IN BASSO ---
             self.data[self.current_project][self.current_subsystem].append(new_req)
+            # ----------------------------------------------------
             self.save_database()
             self.load_table()
             self.refresh_tree() 
